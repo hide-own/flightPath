@@ -1,65 +1,97 @@
 # 飞行日志轨迹视频生成工具
 
-这是一个 Windows 桌面小工具，用来把 Mission Planner / ArduPilot 的 `.bin` 飞行日志生成带卫星地图背景的 `.mp4` 轨迹视频。
+这是一个用于把 Mission Planner / ArduPilot `.bin` 飞行日志生成飞行轨迹视频的本地工具。
 
-## 功能
+当前仓库保留了已验证的 Python/PySide6 MVP，同时正在迁移到新的本地 Web 架构：
 
-- 选择 `.bin` 飞行日志文件。
-- 自动解析 GPS 轨迹、任务航点、速度、高度。
-- 默认按 `RelAlt > 2m` 自动截取真正飞行阶段，也可以使用全部日志。
-- 真正飞行阶段默认带起飞前/降落后各 3 秒缓冲；未检测到真正飞行阶段时会提示并使用完整 GPS 轨迹作为明确 fallback。
-- 使用 Esri World Imagery 卫星瓦片作为地图背景，并缓存到 `cache/tiles`。
-- 红点按日志真实时间插值移动，不按点序号匀速播放。
-- 可显示航点编号、轨迹、当前红点、高度、速度和进度条。
-- 支持选择输出路径、分辨率、帧率和真实时间/压缩时长。
-- 生成过程中可以取消；取消后不会把未完成的视频当作成功结果。
-- 使用 `imageio-ffmpeg` 输出 `.mp4`，不要求系统 PATH 里已有 ffmpeg。
+```text
+浏览器 Vue3 + Naive UI 界面
+        ↓
+localhost FastAPI 服务
+        ↓
+pymavlink 解析 / 地图瓦片缓存 / 视频导出
+```
 
-## 运行
+用户数据默认只在本机处理，不上传到云端。
 
-如果已经创建 `.venv` 并安装依赖，双击：
+## 当前能力
+
+- 解析 Mission Planner / ArduPilot `.bin` 日志。
+- 提取 GPS 轨迹、航点、相对高度、速度和日志时间。
+- 默认按 `RelAlt > 2m` 识别真正飞行阶段。
+- 使用 Esri World Imagery 卫星瓦片，并缓存到本地。
+- 通过 FastAPI 提供本地解析任务、任务状态、进度事件、取消和瓦片接口。
+- Vue3/Naive UI 本地 Web 界面已具备左侧操作栏、右侧地图工作区骨架、文件选择、时间模式、播放范围和日志摘要展示。
+- 旧 PySide6 MVP 仍可作为临时 fallback 使用。
+
+## 本地 Web 版运行
+
+安装 Python 依赖：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+安装前端依赖：
+
+```powershell
+cd web
+npm install --no-audit --no-fund --ignore-scripts
+```
+
+构建浏览器界面：
+
+```powershell
+cd web
+npm run build
+```
+
+双击启动：
+
+```text
+launch_flightpath_web.vbs
+```
+
+该入口会启动本机 FastAPI 服务，并自动打开浏览器访问本地页面。
+
+开发调试也可以运行：
+
+```powershell
+.\.venv\Scripts\python.exe -m flightpath_video.web_launcher
+```
+
+## 旧 PySide6 版运行
+
+如果需要使用旧 MVP：
 
 ```text
 launch_flightpath_video.vbs
 ```
 
-该入口使用 `.venv\Scripts\pythonw.exe` 启动，不会留下命令行窗口。若缺少虚拟环境或依赖，会显示中文启动错误，并把详细信息写入 `launch_error.log`。
-
-开发调试也可以双击：
-
-```bat
-run_app.bat
-```
-
-或在 PowerShell 中运行：
+或：
 
 ```powershell
 .\.venv\Scripts\python.exe -m flightpath_video
 ```
 
-首次安装依赖：
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-## 离线地图说明
-
-程序会把下载过的 Esri 卫星瓦片缓存到 `cache/tiles/esri_world_imagery`。没有网络时，如果当前飞行区域和缩放级别已有缓存，可以继续生成；如果缺少瓦片，会提示“地图下载失败，且本地没有缓存瓦片”。
-
-清理缓存时可以关闭程序后删除 `cache/tiles/esri_world_imagery` 目录。下次生成同一区域视频时，程序会重新下载缺失瓦片。
-
 ## 验证
 
-运行自动化测试：
+Python 测试：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
 
+前端测试和构建：
+
+```powershell
+cd web
+npm test
+npm run build
+```
+
 OpenSpec 校验：
 
 ```powershell
-openspec validate add-flight-log-trajectory-video-tool --strict
+openspec validate migrate-ui-to-local-web-fastapi-3d-preview --strict
 ```

@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 *.mp4
 *.log
+node_modules/
+web/node_modules/
+web/dist/

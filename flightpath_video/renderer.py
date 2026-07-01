@@ -23,6 +23,9 @@ class RenderOptions:
     width: int = 1280
     height: int = 720
     fps: int = 24
+    render_mode: str = "2d"
+    altitude_scale_mode: str = "auto"
+    export_view_mode: str = "auto-fit"
     true_flight_only: bool = True
     rel_alt_threshold_m: float = 2.0
     compressed_duration_s: int | None = None
@@ -109,8 +112,11 @@ def render_video(
             current, point_index = _interpolate_point(points, times, log_time)
             frame = static_frame.copy()
             draw = ImageDraw.Draw(frame, "RGBA")
-            _draw_progress_track(draw, projection, points, point_index, current)
-            _draw_current_marker(draw, projection, current)
+            _draw_progress_track(draw, projection, points, point_index, current, options)
+            _draw_current_marker(draw, projection, current, options, points)
+            if options.export_view_mode == "follow":
+                frame = _shift_follow_frame(frame, projection, current, options, points)
+                draw = ImageDraw.Draw(frame, "RGBA")
             _draw_hud(draw, frame.size, current, display_elapsed, log_duration, options)
             writer.append_data(np.asarray(frame))
 
@@ -155,7 +161,7 @@ def render_preview_image(
     frame = _draw_static_layers(background, projection, points, log_data.waypoints, options)
     current = points[0]
     draw = ImageDraw.Draw(frame, "RGBA")
-    _draw_current_marker(draw, projection, current)
+    _draw_current_marker(draw, projection, current, options, points)
     _draw_hud(draw, frame.size, current, 0.0, max(0.001, points[-1].time_s - points[0].time_s), options)
     return frame
 
@@ -169,7 +175,14 @@ def _draw_static_layers(
 ) -> Image.Image:
     frame = background.copy()
     draw = ImageDraw.Draw(frame, "RGBA")
-    route = [_project_point(projection, point) for point in points]
+    if options.render_mode == "3d":
+        altitude_px_per_m = _altitude_px_per_m(points, frame.size, options)
+        ground_route = [_project_point(projection, point) for point in points]
+        if len(ground_route) >= 2:
+            draw.line(ground_route, fill=(0, 0, 0, 95), width=5, joint="curve")
+        route = [_project_3d_point(projection, point, altitude_px_per_m) for point in points]
+    else:
+        route = [_project_point(projection, point) for point in points]
     if len(route) >= 2:
         draw.line(route, fill=(0, 0, 0, 150), width=7, joint="curve")
         draw.line(route, fill=(75, 214, 255, 230), width=4, joint="curve")
@@ -181,20 +194,67 @@ def _draw_static_layers(
     return frame
 
 
-def _draw_progress_track(draw: ImageDraw.ImageDraw, projection, points: list[TrackPoint], index: int, current: TrackPoint) -> None:
-    flown = [_project_point(projection, point) for point in points[: max(1, index + 1)]]
-    flown.append(_project_point(projection, current))
+def _draw_progress_track(
+    draw: ImageDraw.ImageDraw,
+    projection,
+    points: list[TrackPoint],
+    index: int,
+    current: TrackPoint,
+    options: RenderOptions,
+) -> None:
+    if options.render_mode == "3d":
+        altitude_px_per_m = _altitude_px_per_m(points, draw.im.size, options)
+        flown = [_project_3d_point(projection, point, altitude_px_per_m) for point in points[: max(1, index + 1)]]
+        flown.append(_project_3d_point(projection, current, altitude_px_per_m))
+    else:
+        flown = [_project_point(projection, point) for point in points[: max(1, index + 1)]]
+        flown.append(_project_point(projection, current))
     if len(flown) >= 2:
         draw.line(flown, fill=(255, 255, 255, 185), width=8, joint="curve")
         draw.line(flown, fill=(255, 63, 63, 240), width=4, joint="curve")
 
 
-def _draw_current_marker(draw: ImageDraw.ImageDraw, projection, point: TrackPoint) -> None:
-    x, y = _project_point(projection, point)
+def _draw_current_marker(
+    draw: ImageDraw.ImageDraw,
+    projection,
+    point: TrackPoint,
+    options: RenderOptions,
+    points: list[TrackPoint],
+) -> None:
+    if options.render_mode == "3d":
+        altitude_px_per_m = _altitude_px_per_m(points, draw.im.size, options)
+        ground_x, ground_y = _project_point(projection, point)
+        x, y = _project_3d_point(projection, point, altitude_px_per_m)
+        draw.line((ground_x, ground_y, x, y), fill=(255, 255, 255, 150), width=2)
+        draw.ellipse((ground_x - 12, ground_y - 5, ground_x + 12, ground_y + 5), fill=(0, 0, 0, 95))
+    else:
+        x, y = _project_point(projection, point)
     radius = 10
     draw.ellipse((x - 16, y - 16, x + 16, y + 16), fill=(255, 0, 0, 50))
     draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(232, 26, 36, 255))
     draw.ellipse((x - radius, y - radius, x + radius, y + radius), outline=(255, 255, 255, 245), width=3)
+
+
+def _shift_follow_frame(
+    frame: Image.Image,
+    projection,
+    current: TrackPoint,
+    options: RenderOptions,
+    points: list[TrackPoint],
+) -> Image.Image:
+    if options.render_mode == "3d":
+        altitude_px_per_m = _altitude_px_per_m(points, frame.size, options)
+        current_x, current_y = _project_3d_point(projection, current, altitude_px_per_m)
+    else:
+        current_x, current_y = _project_point(projection, current)
+
+    target_x = frame.width * 0.52
+    target_y = frame.height * 0.52
+    dx = int(round(target_x - current_x))
+    dy = int(round(target_y - current_y))
+    shifted = Image.new(frame.mode, frame.size, (9, 13, 20))
+    shifted.paste(frame, (dx, dy))
+    return shifted
 
 
 def _draw_waypoints(draw: ImageDraw.ImageDraw, projection, waypoints: list[Waypoint]) -> None:
@@ -228,6 +288,8 @@ def _draw_hud(
         lines.append(f"高度 {point.rel_alt_m:.1f} m")
     if options.show_speed:
         lines.append(f"速度 {point.speed_m_s:.1f} m/s")
+    if options.render_mode == "3d":
+        lines.append("3D RelAlt")
 
     text_width = max(draw.textbbox((0, 0), line, font=font)[2] for line in lines)
     box_w = max(260, text_width + 36)
@@ -291,6 +353,25 @@ def progress_bar_percent(frame_index: int, frame_count: int) -> int:
 
 def _project_point(projection, point: TrackPoint) -> tuple[float, float]:
     return projection.project(point.lat, point.lon)
+
+
+def _project_3d_point(projection, point: TrackPoint, altitude_px_per_m: float) -> tuple[float, float]:
+    x, y = _project_point(projection, point)
+    return x, y - max(0.0, point.rel_alt_m) * altitude_px_per_m
+
+
+def _altitude_px_per_m(points: list[TrackPoint], size: tuple[int, int], options: RenderOptions) -> float:
+    if options.render_mode != "3d":
+        return 0.0
+    max_altitude = max((max(0.0, point.rel_alt_m) for point in points), default=0.0)
+    if max_altitude <= 0:
+        return 1.0
+    if options.altitude_scale_mode == "real-ratio":
+        return 1.0
+
+    target_fraction = 0.36 if options.altitude_scale_mode == "enhanced" else 0.24
+    target_pixels = size[1] * target_fraction
+    return max(0.8, min(6.0, target_pixels / max_altitude))
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:

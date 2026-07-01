@@ -12,6 +12,7 @@ from flightpath_video.renderer import (
     RenderOptions,
     _draw_waypoints,
     _interpolate_point,
+    _project_3d_point,
     format_seconds,
     render_preview_image,
     render_video,
@@ -61,6 +62,23 @@ def test_preview_contains_required_layers() -> None:
     assert image.convert("RGB").getbbox() is not None
 
 
+def test_3d_projection_lifts_relative_altitude() -> None:
+    lifted = _project_3d_point(FixedProjection(), TrackPoint(0, 0, 0, rel_alt_m=10), altitude_px_per_m=2)
+
+    assert lifted == (50.0, 30.0)
+
+
+def test_3d_preview_contains_required_layers() -> None:
+    image = render_preview_image(
+        synthetic_log(),
+        RenderOptions(output_path=Path("unused.mp4"), width=320, height=180, fps=2, render_mode="3d"),
+        tile_provider=SolidProvider(),  # type: ignore[arg-type]
+    )
+
+    assert image.size == (320, 180)
+    assert image.convert("RGB").getbbox() is not None
+
+
 def test_waypoint_number_marker_is_compact_enough_for_dense_routes() -> None:
     image = Image.new("RGB", (100, 100), (0, 0, 0))
     draw = ImageDraw.Draw(image, "RGBA")
@@ -95,6 +113,18 @@ def test_render_video_writes_playable_mp4_with_metadata(tmp_path: Path) -> None:
         reader.close()
     assert meta["fps"] == pytest.approx(2)
     assert meta["size"] == (320, 176)
+
+
+def test_render_follow_view_writes_playable_mp4(tmp_path: Path) -> None:
+    output = tmp_path / "follow.mp4"
+
+    render_video(
+        synthetic_log(),
+        RenderOptions(output_path=output, width=320, height=176, fps=2, compressed_duration_s=2, export_view_mode="follow"),
+        tile_provider=SolidProvider(),  # type: ignore[arg-type]
+    )
+
+    assert output.exists()
 
 
 def test_render_cancellation_removes_partial_file(tmp_path: Path) -> None:
