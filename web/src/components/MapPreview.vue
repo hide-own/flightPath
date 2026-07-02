@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
-import { MapboxOverlay } from '@deck.gl/mapbox'
-import { PathLayer, ScatterplotLayer } from '@deck.gl/layers'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { LayersList } from '@deck.gl/core'
 import type { Feature, FeatureCollection, LineString, Point } from 'geojson'
 import type { TrackPoint, Waypoint } from '../api'
 import type { AltitudeScaleMode, CameraState, OverlayState, RenderMode, WaypointMode } from '../stores/flight'
+import { findTrackSegmentIndex } from '../timeline'
 
 const props = withDefaults(
   defineProps<{
@@ -50,17 +49,28 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'camera-change': [camera: CameraState]
+  'timeline-change': [percent: number]
 }>()
 
 const mapContainer = ref<HTMLDivElement | null>(null)
 const mapReady = ref(false)
 let map: maplibregl.Map | null = null
-let deckOverlay: MapboxOverlay | null = null
+let deckOverlay: DeckOverlay | null = null
+let deckModules: DeckModules | null = null
+let deckModulesPromise: Promise<DeckModules> | null = null
 let fittedPointCount = 0
 
 type DeckLayerConstructor = new (props: Record<string, unknown>) => unknown
-const DeckPathLayer = PathLayer as unknown as DeckLayerConstructor
-const DeckScatterplotLayer = ScatterplotLayer as unknown as DeckLayerConstructor
+type DeckOverlay = {
+  setProps: (props: { layers: LayersList }) => void
+  finalize: () => void
+}
+type DeckOverlayConstructor = new (props: { interleaved: boolean; layers: LayersList }) => DeckOverlay
+type DeckModules = {
+  MapboxOverlay: DeckOverlayConstructor
+  PathLayer: DeckLayerConstructor
+  ScatterplotLayer: DeckLayerConstructor
+}
 
 const progressPercent = computed(() => {
   if (props.durationS <= 0) return 0
@@ -101,7 +111,7 @@ onMounted(() => {
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
   map.on('load', () => {
     mapReady.value = true
-    syncMapData()
+    syncStaticMapData()
     fitRouteIfNeeded()
   })
   map.on('moveend', emitCameraState)
@@ -111,17 +121,23 @@ watch(
   () => [
     props.points,
     props.waypoints,
-    props.currentPoint,
-    props.overlays,
+    props.overlays.route,
+    props.overlays.waypoints,
     props.renderMode,
     props.altitudeScaleMode,
     props.waypointMode
   ],
   () => {
-    syncMapData()
+    syncStaticMapData()
     fitRouteIfNeeded()
-  },
-  { deep: true }
+  }
+)
+
+watch(
+  () => [props.currentPoint, props.elapsedS, props.durationS, props.overlays.marker, props.overlays.progress],
+  () => {
+    syncCurrentTimeMapData()
+  }
 )
 
 watch(
@@ -158,30 +174,42 @@ onBeforeUnmount(() => {
   map = null
 })
 
-function syncMapData() {
+function syncStaticMapData() {
   if (!map || !mapReady.value) return
 
   ensureGeoJsonSource('flight-route', createRouteFeature(optimizeDisplayPoints(props.points)))
-  ensureGeoJsonSource('flight-flown-route', createRouteFeature(optimizeDisplayPoints(createFlownPoints(), 1000)))
-  ensureGeoJsonSource('flight-current-marker', createPointFeature(props.currentPoint))
   ensureGeoJsonSource('flight-waypoints', createWaypointFeatures())
 
-  ensureLineLayer('flight-route-line', 'flight-route', '#56d6ff', 4, props.overlays.route)
-  ensureLineLayer('flight-flown-line', 'flight-flown-route', '#ff3864', 5, props.overlays.progress)
-  ensureCircleLayer('flight-current-circle', 'flight-current-marker', '#ef233c', 8, props.overlays.marker)
+  const showGroundRoute = props.renderMode !== '3d'
+  const showGroundWaypoints = props.renderMode !== '3d'
+  ensureLineLayer('flight-route-line', 'flight-route', '#56d6ff', 4, props.overlays.route && showGroundRoute)
   ensureCircleLayer(
     'flight-waypoint-circles',
     'flight-waypoints',
     '#ffd166',
     props.waypointMode === 'points' ? 5 : 7,
-    props.overlays.waypoints && props.waypointMode !== 'hidden'
+    props.overlays.waypoints && props.waypointMode !== 'hidden' && showGroundWaypoints
   )
   ensureSymbolLayer(
     'flight-waypoint-labels',
     'flight-waypoints',
-    props.overlays.waypoints && ['compact', 'all'].includes(props.waypointMode)
+    props.overlays.waypoints && ['compact', 'all'].includes(props.waypointMode) && showGroundWaypoints
   )
-  syncDeckOverlay()
+  syncCurrentTimeMapData()
+  void syncDeckOverlay()
+}
+
+function syncCurrentTimeMapData() {
+  if (!map || !mapReady.value) return
+
+  ensureGeoJsonSource('flight-flown-route', createRouteFeature(optimizeDisplayPoints(createFlownPoints(), 1000)))
+  ensureGeoJsonSource('flight-current-marker', createPointFeature(props.currentPoint))
+  const showGroundRoute = props.renderMode !== '3d'
+  ensureLineLayer('flight-flown-line', 'flight-flown-route', '#ff3864', 5, props.overlays.progress && showGroundRoute)
+  ensureCircleLayer('flight-current-circle', 'flight-current-marker', '#ef233c', 8, props.overlays.marker && showGroundRoute)
+  if (props.renderMode === '3d') {
+    void syncDeckOverlay()
+  }
 }
 
 function fitRouteIfNeeded() {
@@ -197,32 +225,51 @@ function fitRouteIfNeeded() {
   fittedPointCount = props.points.length
 }
 
-function syncDeckOverlay() {
+async function syncDeckOverlay() {
   if (!map) return
   if (props.renderMode !== '3d') {
     deckOverlay?.setProps({ layers: [] })
     return
   }
 
+  const modules = await loadDeckModules()
+  if (!map || props.renderMode !== '3d') return
+
   if (!deckOverlay) {
-    deckOverlay = new MapboxOverlay({ interleaved: false, layers: [] })
+    deckOverlay = new modules.MapboxOverlay({ interleaved: false, layers: [] })
     map.addControl(deckOverlay as unknown as maplibregl.IControl)
   }
 
   deckOverlay.setProps({
-    layers: create3dLayers() as LayersList
+    layers: create3dLayers(modules) as LayersList
   })
 }
 
-function create3dLayers() {
+async function loadDeckModules(): Promise<DeckModules> {
+  if (deckModules) return deckModules
+  deckModulesPromise ??= Promise.all([import('@deck.gl/mapbox'), import('@deck.gl/layers')]).then(
+    ([mapboxModule, layersModule]) => {
+      deckModules = {
+        MapboxOverlay: mapboxModule.MapboxOverlay as unknown as DeckOverlayConstructor,
+        PathLayer: layersModule.PathLayer as unknown as DeckLayerConstructor,
+        ScatterplotLayer: layersModule.ScatterplotLayer as unknown as DeckLayerConstructor
+      }
+      return deckModules
+    }
+  )
+  return deckModulesPromise
+}
+
+function create3dLayers(modules: DeckModules) {
   const altitudeScale = resolveAltitudeScale()
   const routePath = optimizeDisplayPoints(props.points).map((point) => toElevatedCoordinate(point, altitudeScale))
+  const elevatedWaypoints = create3dWaypointData(altitudeScale)
   const currentPosition = props.currentPoint ? toElevatedCoordinate(props.currentPoint, altitudeScale) : null
   const groundPosition = props.currentPoint ? toGroundCoordinate(props.currentPoint) : null
   const heightGuidePath = currentPosition && groundPosition ? [groundPosition, currentPosition] : []
 
   return [
-    new DeckPathLayer({
+    new modules.PathLayer({
       id: 'flight-3d-route',
       data: [{ path: routePath }],
       getPath: (item: { path: number[][] }) => item.path,
@@ -231,7 +278,20 @@ function create3dLayers() {
       widthUnits: 'pixels',
       parameters: { depthTest: true }
     }),
-    new DeckScatterplotLayer({
+    new modules.ScatterplotLayer({
+      id: 'flight-3d-waypoints',
+      data: elevatedWaypoints,
+      getPosition: (item: { position: number[] }) => item.position,
+      getFillColor: [255, 209, 102, 240],
+      getLineColor: [3, 7, 18, 230],
+      getLineWidth: 2,
+      getRadius: 7,
+      lineWidthUnits: 'pixels',
+      radiusUnits: 'pixels',
+      stroked: true,
+      parameters: { depthTest: false }
+    }),
+    new modules.ScatterplotLayer({
       id: 'flight-3d-ground-shadow',
       data: groundPosition ? [{ position: groundPosition }] : [],
       getPosition: (item: { position: number[] }) => item.position,
@@ -239,7 +299,7 @@ function create3dLayers() {
       getRadius: 16,
       radiusUnits: 'pixels'
     }),
-    new DeckPathLayer({
+    new modules.PathLayer({
       id: 'flight-3d-height-guide',
       data: heightGuidePath.length ? [{ path: heightGuidePath }] : [],
       getPath: (item: { path: number[][] }) => item.path,
@@ -248,7 +308,7 @@ function create3dLayers() {
       widthUnits: 'pixels',
       parameters: { depthTest: false }
     }),
-    new DeckScatterplotLayer({
+    new modules.ScatterplotLayer({
       id: 'flight-3d-marker',
       data: currentPosition ? [{ position: currentPosition }] : [],
       getPosition: (item: { position: number[] }) => item.position,
@@ -261,6 +321,15 @@ function create3dLayers() {
       stroked: true
     })
   ]
+}
+
+function create3dWaypointData(altitudeScale: number) {
+  if (!props.overlays.waypoints || props.waypointMode === 'hidden') return []
+  const waypoints = props.waypointMode === 'compact' ? compactWaypoints(props.waypoints) : props.waypoints
+  return waypoints.map((waypoint) => ({
+    position: toElevatedWaypointCoordinate(waypoint, altitudeScale),
+    label: String(waypoint.seq)
+  }))
 }
 
 function resolveAltitudeScale(): number {
@@ -396,12 +465,18 @@ function createWaypointFeatures(): FeatureCollection<Point> {
 
 function createFlownPoints(): TrackPoint[] {
   if (!props.currentPoint) return []
-  const flown = props.points.filter((point) => point.timeS <= props.currentPoint!.timeS)
+  const lastFlownIndex = findTrackSegmentIndex(props.points, props.currentPoint.timeS)
+  const flown = props.points.slice(0, Math.max(1, lastFlownIndex + 1))
   const last = flown[flown.length - 1]
   if (!last || last.timeS !== props.currentPoint.timeS) {
     flown.push(props.currentPoint)
   }
   return flown
+}
+
+function onMapProgressInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  emit('timeline-change', Number(input.value))
 }
 
 function compactWaypoints(waypoints: Waypoint[]): Waypoint[] {
@@ -494,6 +569,27 @@ function toElevatedCoordinate(point: TrackPoint, altitudeScale: number): [number
   return [point.lon, point.lat, Math.max(0, point.relAltM) * altitudeScale]
 }
 
+function toElevatedWaypointCoordinate(waypoint: Waypoint, altitudeScale: number): [number, number, number] {
+  const nearestPoint = findNearestTrackPoint(waypoint)
+  const altitudeM = nearestPoint?.relAltM ?? waypoint.altM ?? 0
+  return [waypoint.lon, waypoint.lat, Math.max(0, altitudeM) * altitudeScale]
+}
+
+function findNearestTrackPoint(waypoint: Waypoint): TrackPoint | null {
+  let nearest: TrackPoint | null = null
+  let nearestDistance = Number.POSITIVE_INFINITY
+
+  for (const point of props.points) {
+    const distance = (point.lon - waypoint.lon) ** 2 + (point.lat - waypoint.lat) ** 2
+    if (distance < nearestDistance) {
+      nearest = point
+      nearestDistance = distance
+    }
+  }
+
+  return nearest
+}
+
 function formatTime(totalSeconds: number): string {
   const safeSeconds = Math.max(0, Math.floor(totalSeconds))
   const minutes = Math.floor(safeSeconds / 60)
@@ -515,8 +611,17 @@ function clamp(value: number, min: number, max: number): number {
       <span v-if="overlays.progress">{{ hudTime }}</span>
     </div>
     <div v-if="renderMode === '3d'" class="relative-altitude-note">3D 高度基于日志相对高度</div>
-    <div v-if="overlays.progress" class="map-progress">
-      <span :style="{ width: `${progressPercent}%` }"></span>
-    </div>
+    <input
+      v-if="overlays.progress"
+      data-testid="map-progress-slider"
+      class="map-progress-slider"
+      type="range"
+      min="0"
+      max="100"
+      step="0.1"
+      :value="progressPercent"
+      aria-label="地图预览进度"
+      @input="onMapProgressInput"
+    />
   </div>
 </template>

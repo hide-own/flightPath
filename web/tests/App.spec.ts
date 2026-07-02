@@ -5,7 +5,9 @@ import App from '../src/App.vue'
 import { useFlightStore } from '../src/stores/flight'
 
 const mapPreviewStub = {
-  template: '<div data-testid="maplibre-host"></div>'
+  props: ['elapsedS', 'durationS'],
+  template:
+    '<button data-testid="map-progress-scrub" :data-elapsed="elapsedS" :data-duration="durationS" @click="$emit(\'timeline-change\', 50)">scrub map progress</button>'
 }
 
 describe('App layout', () => {
@@ -64,6 +66,31 @@ describe('App layout', () => {
     expect((wrapper.get('[data-testid="fps-select"]').element as HTMLSelectElement).value).toBe('24')
   })
 
+  it('updates the preview playback speed from the controls', async () => {
+    const wrapper = mountApp()
+    const store = useFlightStore()
+    const speedSelect = wrapper.get('.timeline [data-testid="playback-speed-select"]')
+
+    expect((speedSelect.element as HTMLSelectElement).value).toBe('1')
+    expect(wrapper.find('[data-testid="speed-2"]').exists()).toBe(false)
+
+    await speedSelect.setValue('2')
+
+    expect(store.preview.playbackSpeed).toBe(2)
+    expect((speedSelect.element as HTMLSelectElement).value).toBe('2')
+  })
+
+  it('keeps advanced controls collapsed to reduce panel clutter', () => {
+    const wrapper = mountApp()
+    const previewSettings = wrapper.get('[data-testid="advanced-preview-settings"]')
+    const exportSettings = wrapper.get('[data-testid="advanced-export-settings"]')
+
+    expect((previewSettings.element as HTMLDetailsElement).open).toBe(false)
+    expect((exportSettings.element as HTMLDetailsElement).open).toBe(false)
+    expect(previewSettings.text()).toContain('3D')
+    expect(exportSettings.text()).toContain('1280x720')
+  })
+
   it('renders parsed log summary when available', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -111,6 +138,56 @@ describe('App layout', () => {
     await wrapper.get('[data-testid="timeline-slider"]').setValue(50)
 
     expect(store.currentTimeS).toBe(11)
+  })
+
+  it('scrubs preview timeline from the right-side map progress control', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useFlightStore()
+    store.selectedPoints = [
+      { timeS: 2, lat: 30, lon: 120, relAltM: 2, speedMS: 2 },
+      { timeS: 20, lat: 30.0004, lon: 120.0004, relAltM: 10, speedMS: 6 }
+    ]
+    store.preview.currentTimeS = 2
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          MapPreview: mapPreviewStub
+        }
+      }
+    })
+
+    await wrapper.get('[data-testid="map-progress-scrub"]').trigger('click')
+
+    expect(store.currentTimeS).toBe(11)
+  })
+
+  it('passes compressed preview time to the map preview', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useFlightStore()
+    store.selectedPoints = [
+      { timeS: 2, lat: 30, lon: 120, relAltM: 2, speedMS: 2 },
+      { timeS: 20, lat: 30.0004, lon: 120.0004, relAltM: 10, speedMS: 6 }
+    ]
+    store.preview.currentTimeS = 11
+    store.exportOptions.timeMode = 'compressed'
+    store.exportOptions.compressedDurationS = 9
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          MapPreview: mapPreviewStub
+        }
+      }
+    })
+
+    const mapPreview = wrapper.get('[data-testid="map-progress-scrub"]')
+    expect(mapPreview.attributes('data-elapsed')).toBe('4.5')
+    expect(mapPreview.attributes('data-duration')).toBe('9')
   })
 })
 

@@ -132,6 +132,71 @@ describe('flight store', () => {
     expect(store.preview.isPlaying).toBe(false)
   })
 
+  it('throttles preview playback updates to reduce render churn', async () => {
+    mockCompletedJob()
+    const store = useFlightStore()
+    store.setLogFile(new File(['BIN'], 'flight.bin', { type: 'application/octet-stream' }))
+    store.parseJobId = 'job-123'
+    await store.refreshParseJob()
+
+    store.playPreview(1000)
+    store.advancePreview(1010)
+
+    expect(store.currentTimeS).toBe(2)
+
+    store.advancePreview(1040)
+
+    expect(store.currentTimeS).toBeCloseTo(2.04)
+  })
+
+  it('continues playback from scrubbed timeline progress while playing', async () => {
+    mockCompletedJob()
+    const store = useFlightStore()
+    store.setLogFile(new File(['BIN'], 'flight.bin', { type: 'application/octet-stream' }))
+    store.parseJobId = 'job-123'
+    await store.refreshParseJob()
+
+    store.playPreview(1000)
+    store.advancePreview(3500)
+    store.setTimelineProgress(50, 3500)
+    store.advancePreview(4500)
+
+    expect(store.currentTimeS).toBe(12)
+  })
+
+  it('advances preview playback by the selected playback speed', async () => {
+    mockCompletedJob()
+    const store = useFlightStore()
+    store.setLogFile(new File(['BIN'], 'flight.bin', { type: 'application/octet-stream' }))
+    store.parseJobId = 'job-123'
+    await store.refreshParseJob()
+
+    store.setPlaybackSpeed(2)
+    store.playPreview(1000)
+    store.advancePreview(2000)
+
+    expect(store.currentTimeS).toBe(4)
+  })
+
+  it('uses compressed duration for preview playback timing and displayed time', async () => {
+    mockCompletedJob()
+    const store = useFlightStore()
+    store.setLogFile(new File(['BIN'], 'flight.bin', { type: 'application/octet-stream' }))
+    store.parseJobId = 'job-123'
+    await store.refreshParseJob()
+
+    store.exportOptions.timeMode = 'compressed'
+    store.exportOptions.compressedDurationS = 9
+
+    expect(store.previewDurationS).toBe(9)
+
+    store.playPreview(1000)
+    store.advancePreview(5500)
+
+    expect(store.currentTimeS).toBe(11)
+    expect(store.previewElapsedS).toBe(4.5)
+  })
+
   it('creates an export job from the parsed log path and preview state', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

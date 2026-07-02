@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { interpolateTrackPoint, playbackTimeToLogTime } from '../src/timeline'
+import { findTrackSegmentIndex, interpolateTrackPoint, playbackTimeToLogTime } from '../src/timeline'
 
 const points = [
   { timeS: 0, lat: 30, lon: 120, relAltM: 0, speedMS: 0 },
@@ -19,5 +19,19 @@ describe('timeline interpolation', () => {
 
   it('maps compressed playback time to proportional log time', () => {
     expect(playbackTimeToLogTime({ playbackTimeS: 5, logStartS: 0, logEndS: 100, outputDurationS: 10 })).toBe(50)
+  })
+
+  it('finds the interpolation segment with boundary-safe binary search', () => {
+    const longTrack = Array.from({ length: 10000 }, (_, index) => ({
+      timeS: index * 0.5,
+      lat: 30,
+      lon: 120,
+      relAltM: 0,
+      speedMS: 0
+    }))
+
+    expect(findTrackSegmentIndex(longTrack, -1)).toBe(0)
+    expect(findTrackSegmentIndex(longTrack, 250.25)).toBe(500)
+    expect(findTrackSegmentIndex(longTrack, 999999)).toBe(longTrack.length - 1)
   })
 })

@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-import imageio.v2 as imageio
-import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .map_tiles import MapCancelled, TileProvider, build_satellite_background
@@ -84,6 +82,9 @@ def render_video(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     _emit(progress_callback, 5, f"正在渲染 0s / {output_duration:.0f}s")
+    import imageio.v2 as imageio
+    import numpy as np
+
     writer = None
     completed = False
     try:

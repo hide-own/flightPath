@@ -18,22 +18,42 @@ export function interpolateTrackPoint(points: TrackPoint[], logTimeS: number): T
     return last
   }
 
-  for (let index = 1; index < points.length; index += 1) {
-    const previous = points[index - 1]
-    const next = points[index]
-    if (logTimeS <= next.timeS) {
-      const duration = Math.max(0.001, next.timeS - previous.timeS)
-      const ratio = (logTimeS - previous.timeS) / duration
-      return {
-        timeS: logTimeS,
-        lat: lerp(previous.lat, next.lat, ratio),
-        lon: lerp(previous.lon, next.lon, ratio),
-        relAltM: lerp(previous.relAltM, next.relAltM, ratio),
-        speedMS: lerp(previous.speedMS, next.speedMS, ratio)
-      }
+  const previousIndex = findTrackSegmentIndex(points, logTimeS)
+  if (previousIndex >= points.length - 1) {
+    return last
+  }
+  const previous = points[previousIndex]
+  const next = points[previousIndex + 1]
+  const duration = Math.max(0.001, next.timeS - previous.timeS)
+  const ratio = (logTimeS - previous.timeS) / duration
+  return {
+    timeS: logTimeS,
+    lat: lerp(previous.lat, next.lat, ratio),
+    lon: lerp(previous.lon, next.lon, ratio),
+    relAltM: lerp(previous.relAltM, next.relAltM, ratio),
+    speedMS: lerp(previous.speedMS, next.speedMS, ratio)
+  }
+}
+
+export function findTrackSegmentIndex(points: TrackPoint[], logTimeS: number): number {
+  if (points.length <= 1 || logTimeS <= points[0].timeS) {
+    return 0
+  }
+  if (logTimeS >= points[points.length - 1].timeS) {
+    return points.length - 1
+  }
+
+  let low = 0
+  let high = points.length - 1
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    if (points[mid].timeS <= logTimeS) {
+      low = mid + 1
+    } else {
+      high = mid - 1
     }
   }
-  return last
+  return Math.max(0, high)
 }
 
 export function playbackTimeToLogTime(input: {

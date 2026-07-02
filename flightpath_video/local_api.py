@@ -10,6 +10,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
 
 from .job_manager import CancellationToken, JobManager
@@ -183,14 +184,7 @@ def create_app(
     def get_esri_tile(z: int, x: int, y: int) -> Response:
         if z < 1 or z > 22 or x < 0 or y < 0:
             raise HTTPException(status_code=422, detail={"code": "INVALID_TILE", "message": "Invalid tile coordinates"})
-        try:
-            tile = tiles.get_tile(z, x, y)
-        except MapDownloadError as exc:
-            raise HTTPException(status_code=503, detail={"code": "MAP_DOWNLOAD_FAILED", "message": str(exc)}) from exc
-
-        buffer = BytesIO()
-        tile.save(buffer, format="JPEG", quality=90)
-        return Response(content=buffer.getvalue(), media_type="image/jpeg")
+        return _tile_response(_get_preview_tile(tiles, z, x, y))
 
     resolved_static_dir = static_dir or _default_static_dir()
     if resolved_static_dir is not None and resolved_static_dir.exists():
@@ -311,6 +305,52 @@ def _duration(points: list[TrackPoint]) -> float:
     if len(points) < 2:
         return 0.0
     return max(0.0, points[-1].time_s - points[0].time_s)
+
+
+def _get_preview_tile(tiles: TileProvider, z: int, x: int, y: int) -> Image.Image:
+    try:
+        return tiles.get_tile(z, x, y)
+    except MapDownloadError:
+        fallback = _lower_zoom_tile(tiles, z, x, y)
+        return fallback if fallback is not None else _placeholder_tile(z, x, y)
+
+
+def _lower_zoom_tile(tiles: TileProvider, z: int, x: int, y: int) -> Image.Image | None:
+    for parent_z in range(z - 1, max(0, z - 8), -1):
+        scale = 2 ** (z - parent_z)
+        parent_x = x // scale
+        parent_y = y // scale
+        try:
+            parent = tiles.get_tile(parent_z, parent_x, parent_y)
+        except MapDownloadError:
+            continue
+
+        tile_width, tile_height = parent.size
+        crop_width = tile_width // scale
+        crop_height = tile_height // scale
+        if crop_width < 1 or crop_height < 1:
+            continue
+
+        left = (x % scale) * crop_width
+        top = (y % scale) * crop_height
+        crop = parent.crop((left, top, left + crop_width, top + crop_height))
+        return crop.resize((256, 256), Image.Resampling.BILINEAR)
+    return None
+
+
+def _placeholder_tile(z: int, x: int, y: int) -> Image.Image:
+    tile = Image.new("RGB", (256, 256), (31, 41, 55))
+    draw = ImageDraw.Draw(tile)
+    draw.line((0, 255, 255, 0), fill=(51, 65, 85), width=3)
+    draw.line((0, 0, 255, 255), fill=(51, 65, 85), width=3)
+    draw.text((10, 12), f"tile unavailable\nz{z} x{x} y{y}", fill=(148, 163, 184))
+    return tile
+
+
+def _tile_response(tile: Image.Image) -> Response:
+    buffer = BytesIO()
+    tile.save(buffer, format="JPEG", quality=90)
+    return Response(content=buffer.getvalue(), media_type="image/jpeg")
 
 
 def _default_static_dir() -> Path | None:

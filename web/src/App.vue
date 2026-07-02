@@ -76,6 +76,11 @@ function setExportView(mode: ExportViewMode) {
   flightStore.exportOptions.viewMode = mode
 }
 
+function onPlaybackSpeedChange(event: Event) {
+  const input = event.target as HTMLSelectElement
+  flightStore.setPlaybackSpeed(Number(input.value))
+}
+
 function toggleOverlay(name: keyof OverlayState) {
   flightStore.setOverlay(name, !flightStore.preview.overlays[name])
 }
@@ -83,6 +88,10 @@ function toggleOverlay(name: keyof OverlayState) {
 function onTimelineInput(event: Event) {
   const input = event.target as HTMLInputElement
   flightStore.setTimelineProgress(Number(input.value))
+}
+
+function onTimelinePercentChange(percent: number) {
+  flightStore.setTimelineProgress(percent)
 }
 
 function togglePlayback() {
@@ -268,6 +277,9 @@ onBeforeUnmount(cancelScheduledPlayback)
           </div>
         </section>
 
+        <details class="control-section collapsible-section" data-testid="advanced-preview-settings">
+          <summary>高级预览</summary>
+          <div class="collapsible-content">
         <section class="control-section">
           <h2>航点模式</h2>
           <div class="segmented vertical compact-segmented">
@@ -371,6 +383,12 @@ onBeforeUnmount(cancelScheduledPlayback)
           </label>
         </section>
 
+          </div>
+        </details>
+
+        <details class="control-section collapsible-section" data-testid="advanced-export-settings">
+          <summary>导出设置</summary>
+          <div class="collapsible-content">
         <section class="control-section">
           <h2>导出</h2>
           <div class="segmented vertical">
@@ -416,6 +434,9 @@ onBeforeUnmount(cancelScheduledPlayback)
           </label>
         </section>
 
+          </div>
+        </details>
+
         <footer class="action-area">
           <n-button data-testid="parse-action" type="primary" class="full-button" @click="startParse">
             <template #icon>
@@ -440,14 +461,15 @@ onBeforeUnmount(cancelScheduledPlayback)
           :points="flightStore.activePoints"
           :waypoints="flightStore.waypoints"
           :current-point="flightStore.currentPoint"
-          :elapsed-s="flightStore.elapsedS"
-          :duration-s="flightStore.durationS"
+          :elapsed-s="flightStore.previewElapsedS"
+          :duration-s="flightStore.previewDurationS"
           :overlays="flightStore.preview.overlays"
           :render-mode="flightStore.preview.renderMode"
           :altitude-scale-mode="flightStore.preview.altitudeScaleMode"
           :waypoint-mode="flightStore.preview.waypointMode"
           :camera="flightStore.preview.camera"
           @camera-change="flightStore.updateCamera"
+          @timeline-change="onTimelinePercentChange"
         />
         <div class="timeline">
           <button
@@ -458,6 +480,19 @@ onBeforeUnmount(cancelScheduledPlayback)
             <Pause v-if="flightStore.preview.isPlaying" :size="16" />
             <Play v-else :size="16" />
           </button>
+          <select
+            data-testid="playback-speed-select"
+            class="playback-speed-select"
+            :value="String(flightStore.preview.playbackSpeed)"
+            aria-label="播放速度"
+            @change="onPlaybackSpeedChange"
+          >
+            <option value="0.5">0.5x</option>
+            <option value="1">1x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+          </select>
           <input
             data-testid="timeline-slider"
             type="range"

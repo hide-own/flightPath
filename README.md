@@ -29,6 +29,12 @@
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
+开发和测试环境还需要：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+```
+
 安装前端依赖：
 
 ```powershell

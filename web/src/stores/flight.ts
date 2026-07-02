@@ -41,9 +41,11 @@ export interface PreviewState {
   altitudeScaleMode: AltitudeScaleMode
   overlays: OverlayState
   currentTimeS: number
+  playbackSpeed: number
   isPlaying: boolean
   playbackStartedAtMs: number | null
   playbackStartTimeS: number
+  lastAdvanceAtMs: number | null
 }
 
 export interface ExportOptions {
@@ -108,6 +110,26 @@ export const useFlightStore = defineStore('flight', {
       const first = this.activePoints[0]
       if (!first) return 0
       return Math.max(0, this.preview.currentTimeS - first.timeS)
+    },
+    previewDurationS(): number {
+      const duration = this.durationS
+      if (duration <= 0) return 0
+      if (this.exportOptions.timeMode !== 'compressed') return duration
+      return Math.max(0, this.exportOptions.compressedDurationS)
+    },
+    previewElapsedS(): number {
+      const duration = this.durationS
+      const previewDuration = this.previewDurationS
+      if (duration <= 0 || previewDuration <= 0) return 0
+      return clamp((this.elapsedS / duration) * previewDuration, 0, previewDuration)
+    },
+    effectivePlaybackRate(): number {
+      const duration = this.durationS
+      const previewDuration = this.previewDurationS
+      if (this.exportOptions.timeMode !== 'compressed' || duration <= 0 || previewDuration <= 0) {
+        return this.preview.playbackSpeed
+      }
+      return this.preview.playbackSpeed * (duration / previewDuration)
     },
     timelineProgressPercent(): number {
       const first = this.activePoints[0]
@@ -184,11 +206,16 @@ export const useFlightStore = defineStore('flight', {
       this.playbackRange = range
       this.resetTimelineToStart()
     },
-    setTimelineProgress(percent: number) {
+    setTimelineProgress(percent: number, nowMs = performance.now()) {
       const points = this.activePoints
       if (points.length === 0) return
       const first = points[0]
       this.setCurrentTimeS(first.timeS + getDuration(points) * clamp(percent / 100, 0, 1))
+      if (this.preview.isPlaying && this.preview.playbackStartedAtMs !== null) {
+        this.preview.playbackStartedAtMs = nowMs
+        this.preview.playbackStartTimeS = this.preview.currentTimeS
+        this.preview.lastAdvanceAtMs = nowMs
+      }
     },
     setCurrentTimeS(timeS: number) {
       const points = this.activePoints
@@ -198,18 +225,35 @@ export const useFlightStore = defineStore('flight', {
       }
       this.preview.currentTimeS = clamp(timeS, points[0].timeS, points[points.length - 1].timeS)
     },
+    setPlaybackSpeed(speed: number, nowMs = performance.now()) {
+      this.preview.playbackSpeed = Number.isFinite(speed) ? clamp(speed, 0.25, 4) : 1
+      if (this.preview.isPlaying && this.preview.playbackStartedAtMs !== null) {
+        this.preview.playbackStartedAtMs = nowMs
+        this.preview.playbackStartTimeS = this.preview.currentTimeS
+        this.preview.lastAdvanceAtMs = nowMs
+      }
+    },
     playPreview(nowMs = performance.now()) {
       this.validateCanPreview()
       this.preview.isPlaying = true
       this.preview.playbackStartedAtMs = nowMs
       this.preview.playbackStartTimeS = this.preview.currentTimeS
+      this.preview.lastAdvanceAtMs = nowMs
     },
     advancePreview(nowMs = performance.now()) {
       if (!this.preview.isPlaying || this.preview.playbackStartedAtMs === null) {
         return
       }
-      const elapsedS = (nowMs - this.preview.playbackStartedAtMs) / 1000
-      this.setCurrentTimeS(this.preview.playbackStartTimeS + elapsedS)
+      if (
+        this.preview.lastAdvanceAtMs !== null &&
+        nowMs - this.preview.lastAdvanceAtMs < PREVIEW_FRAME_INTERVAL_MS
+      ) {
+        return
+      }
+      const previousAdvanceAtMs = this.preview.lastAdvanceAtMs ?? this.preview.playbackStartedAtMs
+      this.preview.lastAdvanceAtMs = nowMs
+      const elapsedS = (nowMs - previousAdvanceAtMs) / 1000
+      this.setCurrentTimeS(this.preview.currentTimeS + elapsedS * this.effectivePlaybackRate)
       const last = this.activePoints[this.activePoints.length - 1]
       if (last && this.preview.currentTimeS >= last.timeS) {
         this.pausePreview()
@@ -219,6 +263,7 @@ export const useFlightStore = defineStore('flight', {
       this.preview.isPlaying = false
       this.preview.playbackStartedAtMs = null
       this.preview.playbackStartTimeS = this.preview.currentTimeS
+      this.preview.lastAdvanceAtMs = null
     },
     updateCamera(camera: Partial<CameraState>) {
       this.preview.camera = { ...this.preview.camera, ...camera }
@@ -334,9 +379,11 @@ function createDefaultPreviewState(): PreviewState {
       progress: true
     },
     currentTimeS: 0,
+    playbackSpeed: 1,
     isPlaying: false,
     playbackStartedAtMs: null,
-    playbackStartTimeS: 0
+    playbackStartTimeS: 0,
+    lastAdvanceAtMs: null
   }
 }
 
@@ -376,3 +423,5 @@ function sleep(ms: number): Promise<void> {
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
+
+const PREVIEW_FRAME_INTERVAL_MS = 1000 / 30
