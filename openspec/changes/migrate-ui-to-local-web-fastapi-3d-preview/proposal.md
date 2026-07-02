@@ -1,10 +1,10 @@
 ## Why
 
-The current PySide6 MVP proves the flight-log-to-video workflow, but the next product step needs a more interactive and polished UI, timeline scrubbing, map manipulation, 3D altitude preview, and a simpler delivery path than a full Electron shell. A local Web application with a browser UI and localhost FastAPI service keeps user data on the machine, reuses the existing Python/pymavlink engine, and avoids Electron packaging complexity while still feeling like a one-click desktop tool.
+A local Web application with a browser UI and localhost FastAPI service keeps user data on the machine, reuses the existing Python/pymavlink engine, and avoids Electron packaging complexity while still feeling like a one-click local tool.
 
 ## What Changes
 
-- Replace the PySide6 user-facing workflow with a local Web UI built with Vue3 + TypeScript + Vite + Naive UI, opened in the user's browser by a one-click launcher.
+- Use a local Web UI built with Vue3 + TypeScript + Vite + Naive UI, opened in the user's browser by a one-click launcher, as the only user-facing workflow.
 - Provide a localhost FastAPI service as the app backend for `.bin` parsing, map tile cache access, long-running job management, progress streaming, cancellation, and MP4 export.
 - Keep Python as the first-version backend implementation because the existing ArduPilot DataFlash parser uses `pymavlink`; Java API service options were considered but are deferred unless a future requirement justifies Java + Python worker packaging.
 - Add a bounded concurrent job model: API handlers remain responsive, parsing runs in background jobs, map tile downloads use a small worker pool, and video export is limited to a controlled number of simultaneous jobs by default.

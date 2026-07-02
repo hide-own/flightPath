@@ -1,3 +1,3 @@
-from .app import main
+from .web_launcher import main
 
 raise SystemExit(main())

@@ -1,6 +1,6 @@
 ## Context
 
-The project currently has a working Python/PySide6 MVP that parses Mission Planner / ArduPilot `.bin` logs, downloads and caches Esri satellite tiles, renders a 2D trajectory with Pillow, and writes MP4 output. That MVP validated the core data path, but the UI is limited for interactive preview, timeline scrubbing, modern visual states, map manipulation, and 3D altitude visualization.
+The project now uses a local Web architecture for the user-facing workflow while preserving the proven Python data path for Mission Planner / ArduPilot `.bin` parsing, Esri satellite tile caching, and MP4 export.
 
 This change upgrades the product to a local Web application: a Vue3 browser UI opened by a Windows launcher, backed by a FastAPI service bound to localhost. User data stays local. The browser provides an excellent WebGL map environment without Electron packaging, while Python remains the best first-version backend because the existing parser already depends on `pymavlink`.
 
@@ -155,7 +155,7 @@ Compact should be the default for polished visuals.
 ## Migration Plan
 
 1. Keep the existing Python application runnable while adding local API modules in parallel.
-2. Add FastAPI dependencies and a local API entry point that can run without starting PySide6.
+2. Add FastAPI dependencies and a local API entry point that can run without a desktop UI.
 3. Add the job manager, progress event stream, cancellation tokens, and API contract tests.
 4. Expose `.bin` parsing through parse jobs and normalized JSON responses.
 5. Expose Esri tile cache through the local tile endpoint.
@@ -164,9 +164,9 @@ Compact should be the default for polished visuals.
 8. Add 3D trajectory layers and altitude scale controls.
 9. Add preview-state export and MP4 download.
 10. Update launch scripts to start FastAPI and open the browser UI.
-11. Keep the old PySide6 path as a temporary fallback until local Web acceptance passes, then remove or mark it as legacy.
+11. Remove the old desktop path after local Web acceptance and keep the Web launcher as the single entry point.
 
-Rollback strategy: if local Web export blocks release, keep the PySide6 MVP as the available stable app and ship the local Web work only after preview/export acceptance is met.
+Rollback strategy: if local Web export blocks release, keep the service and browser preview usable while limiting export-specific controls until preview/export acceptance is met.
 
 ## Open Questions
 

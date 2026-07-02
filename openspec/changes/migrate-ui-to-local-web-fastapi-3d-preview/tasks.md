@@ -1,6 +1,6 @@
 ## 1. Project Structure And Tooling
 
-- [x] 1.1 Add local Web project structure for Vue3 + TypeScript + Vite without removing the existing Python MVP path.
+- [x] 1.1 Add local Web project structure for Vue3 + TypeScript + Vite as the only user-facing app path.
 - [x] 1.2 Add frontend dependencies for Naive UI, Pinia, lucide-vue-next, MapLibre GL JS, and the selected WebGL overlay library.
 - [x] 1.3 Add backend dependencies for FastAPI, ASGI serving, multipart uploads, and tests.
 - [x] 1.4 Configure frontend linting, formatting, TypeScript checks, and unit test runner.
@@ -8,7 +8,7 @@
 
 ## 2. Local FastAPI Service And Job Manager
 
-- [x] 2.1 Add a FastAPI application entry point that can run without starting the PySide6 UI.
+- [x] 2.1 Add a FastAPI application entry point that can run without a desktop UI.
 - [x] 2.2 Define versioned JSON schemas for job creation, job status, parsed log responses, progress events, cancellation, and errors.
 - [x] 2.3 Implement a bounded in-memory job manager with job ids, statuses, results, errors, progress events, and cancellation tokens.
 - [x] 2.4 Implement a parse worker path that runs outside the HTTP request handler.
@@ -99,7 +99,7 @@
 - [x] 10.1 Add a one-click Windows launch artifact for the local Web app.
 - [x] 10.2 Ensure startup failures produce localized user-facing or logged errors.
 - [x] 10.3 Start the FastAPI service on an available localhost port and open the browser UI.
-- [x] 10.4 Keep the existing PySide6 MVP launch available as a temporary fallback until local Web acceptance passes.
+- [x] 10.4 Remove the old desktop launch and UI path after local Web acceptance.
 - [x] 10.5 Update README and user-facing run instructions for the local Web app.
 
 ## 11. Verification And Acceptance

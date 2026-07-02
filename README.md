@@ -1,15 +1,13 @@
 # 飞行日志轨迹视频生成工具
 
-这是一个用于把 Mission Planner / ArduPilot `.bin` 飞行日志生成飞行轨迹视频的本地工具。
+这是一个用于把 Mission Planner / ArduPilot `.bin` 飞行日志生成飞行轨迹视频的本地 Web 工具。
 
-当前仓库保留了已验证的 Python/PySide6 MVP，同时正在迁移到新的本地 Web 架构：
+当前仓库只保留本地 Web 架构：
 
 ```text
 浏览器 Vue3 + Naive UI 界面
-        ↓
-localhost FastAPI 服务
-        ↓
-pymavlink 解析 / 地图瓦片缓存 / 视频导出
+        -> localhost FastAPI 服务
+        -> pymavlink 解析 / 地图瓦片缓存 / 视频导出
 ```
 
 用户数据默认只在本机处理，不上传到云端。
@@ -20,11 +18,10 @@ pymavlink 解析 / 地图瓦片缓存 / 视频导出
 - 提取 GPS 轨迹、航点、相对高度、速度和日志时间。
 - 默认按 `RelAlt > 2m` 识别真正飞行阶段。
 - 使用 Esri World Imagery 卫星瓦片，并缓存到本地。
-- 通过 FastAPI 提供本地解析任务、任务状态、进度事件、取消和瓦片接口。
-- Vue3/Naive UI 本地 Web 界面已具备左侧操作栏、右侧地图工作区骨架、文件选择、时间模式、播放范围和日志摘要展示。
-- 旧 PySide6 MVP 仍可作为临时 fallback 使用。
+- 通过 FastAPI 提供本地解析任务、任务状态、进度事件、取消、导出和瓦片接口。
+- Vue3/Naive UI 本地 Web 界面提供左侧操作栏、右侧地图工作区、文件选择、时间模式、播放范围和日志摘要展示。
 
-## 本地 Web 版运行
+## 运行
 
 安装 Python 依赖：
 
@@ -57,21 +54,13 @@ launch_flightpath_web.vbs
 开发调试也可以运行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m flightpath_video.web_launcher
-```
-
-## 旧 PySide6 版运行
-
-如果需要使用旧 MVP：
-
-```text
-launch_flightpath_video.vbs
+.\.venv\Scripts\python.exe -m flightpath_video
 ```
 
 或：
 
 ```powershell
-.\.venv\Scripts\python.exe -m flightpath_video
+.\.venv\Scripts\python.exe -m flightpath_video.web_launcher
 ```
 
 ## 验证
